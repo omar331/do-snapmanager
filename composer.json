@@ -1,0 +1,15 @@
+{
+    "name": "omar331/do-snapmanager",
+    "description": "Manage a set of snapshots of Digital Ocean's Droplets. It keeps a certain number of snapshots of each selected droplet.",
+    "type": "project",
+    "require": {
+        "toin0u/trustpilot": "^0.1.6"
+    },
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Omar Alves",
+            "email": "omar331@gmail.com"
+        }
+    ]
+}
