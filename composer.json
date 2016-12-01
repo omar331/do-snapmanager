@@ -3,7 +3,10 @@
     "description": "Manage a set of snapshots of Digital Ocean's Droplets. It keeps a certain number of snapshots of each selected droplet.",
     "type": "project",
     "require": {
-        "toin0u/trustpilot": "^0.1.6"
+        "php": ">=5.3.0",
+        "monolog/monolog": "1.0.*",
+        "toin0u/digitalocean-v2": "~2.0",
+        "kriswallsmith/buzz": "~0.10"
     },
     "license": "MIT",
     "authors": [
@@ -11,5 +14,10 @@
             "name": "Omar Alves",
             "email": "omar331@gmail.com"
         }
-    ]
+    ],
+    "autoload": {
+        "psr-0": {
+            "DO": "src/"
+        }
+    }
 }
