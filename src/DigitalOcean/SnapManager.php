@@ -2,6 +2,7 @@
 namespace DigitalOcean;
 
 use DigitalOceanV2\Api\Droplet;
+use DigitalOceanV2\Entity\Image;
 use DigitalOceanV2\Exception\HttpException;
 use Monolog\Logger;
 use Monolog\Handler\StreamHandler;
@@ -115,14 +116,31 @@ class SnapManager {
      */
     public function startCopyToRegions( \DigitalOceanV2\Entity\Droplet $droplet, $snapshotName, Array $copyToRegions ) {
 
+        // Get snapshot
+        $managedSnapshots = $this->getManagedDropletSnapshots( $droplet );
+
+        /** @var Image $selectedSnapshot */
+        $selectedSnapshot = null;
+
+        /** @var Image $snapshot */
+        foreach ( $managedSnapshots as $snapshot ) {
+            if ( $snapshot->name != $snapshotName ) continue;
+            $selectedSnapshot = $snapshot;
+        }
 
 
-        
+        if ( $selectedSnapshot ) {
+            foreach( $copyToRegions as $region ) {
+                $this->logger->info('Starting tranfer to region', $region);
 
-
-
-
-
+                try {
+                    $action = $this->digitalocean->image()
+                        ->transfer( $selectedSnapshot->id, $region );
+                } catch ( \RuntimeException $e ) {
+                    $this->logger->err('Failed to start copy to region', $region);
+                }
+            }
+        }
     }
 
 
@@ -220,7 +238,7 @@ class SnapManager {
      * @internal param $dropletName
      */
     private function getSnapshotPrefix( $dropletName ) {
-        return sprintf('%s-%s',  static::SNAP_PREFIX_BASE, $dropletName);
+        return sprintf('%s%s',  static::SNAP_PREFIX_BASE, $dropletName);
     }
 
 
