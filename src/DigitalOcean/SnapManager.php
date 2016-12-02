@@ -1,6 +1,7 @@
 <?php
 namespace DigitalOcean;
 
+use Buzz\Exception\RuntimeException;
 use DigitalOceanV2\Api\Droplet;
 use DigitalOceanV2\Entity\Image;
 use DigitalOceanV2\Exception\HttpException;
@@ -54,13 +55,18 @@ class SnapManager {
         $this->logger->info('Starting snapshots creation...');
         $createSnapActions = $this->startSnapshotCreation( $this->config['droplets'] );
 
-
         /*
          * ---> track creation actions.
          *      After finishing each one of them,
          *      trigger copy to other regions
          */
         $this->trackCreateSnapActions($createSnapActions);
+
+
+        /**
+         * Prune older snapshots
+         */
+        $this->pruneOlderSnapshots( $this->config['droplets'] );
     }
 
 
@@ -86,7 +92,7 @@ class SnapManager {
                 if ( $action->status == 'completed' ) {
                     $pendingActions--;
 
-                    $this->logger->info( sprintf('Droplet snaphot (%s) creation completed.', $createAction['droplet']->name ) );
+                    $this->logger->info( sprintf('Droplet snapshot (%s) creation completed.', $createAction['droplet']->name ) );
 
                     // copy snapshot to specified regions
                     $this->startCopyToRegions(
@@ -115,19 +121,14 @@ class SnapManager {
      * @param array $copyToRegions
      */
     public function startCopyToRegions( \DigitalOceanV2\Entity\Droplet $droplet, $snapshotName, Array $copyToRegions ) {
+        $this->logger->info( sprintf('Started copying snapshot %s to other regions.', $snapshotName ), $copyToRegions );
 
-        // Get snapshot
-        $managedSnapshots = $this->getManagedDropletSnapshots( $droplet );
+        $selectedSnapshot = $this->getSnapshotByName( $droplet, $snapshotName );
 
-        /** @var Image $selectedSnapshot */
-        $selectedSnapshot = null;
 
-        /** @var Image $snapshot */
-        foreach ( $managedSnapshots as $snapshot ) {
-            if ( $snapshot->name != $snapshotName ) continue;
-            $selectedSnapshot = $snapshot;
-        }
-
+//echo " ************ GOT SNAPSHOT *********** \n";
+//print_r($selectedSnapshot);
+//
 
         if ( $selectedSnapshot ) {
             foreach( $copyToRegions as $region ) {
@@ -141,6 +142,40 @@ class SnapManager {
                 }
             }
         }
+    }
+
+
+
+
+    /**
+     * Get a snapshot from a droplet by its name
+     *
+     * @param \DigitalOceanV2\Entity\Droplet $droplet
+     * @param $snapshotName
+     * @return Image
+     */
+    public function getSnapshotByName( \DigitalOceanV2\Entity\Droplet $droplet, $snapshotName ) {
+        /** @var Image $selectedSnapshot */
+        $selectedSnapshot = null;
+
+        $attempts = 0;
+        while ( ( $selectedSnapshot === null  ) and ( $attempts < 10 ) ) {
+            $attempts++;
+
+            // Get snapshot
+            $managedSnapshots = $this->getManagedDropletSnapshots( $droplet );
+
+            echo " GOT MANAGED SNAPSHOTS   **** \n";
+            print_r( $managedSnapshots );
+
+            /** @var Image $snapshot */
+            foreach ( $managedSnapshots as $snapshot ) {
+                if ( $snapshot->name != $snapshotName ) continue;
+                $selectedSnapshot = $snapshot;
+            }
+        }
+
+        return $selectedSnapshot;
     }
 
 
@@ -273,9 +308,9 @@ class SnapManager {
         $snapPrefix = $this->getSnapshotPrefix( $droplet->name );
 
         $managedOnes = [];
-        foreach( $this->getDropletsSnapshots($droplet) as $droplet ) {
-            if ( ! strpos($droplet->name, $snapPrefix)  ) continue;
-            $managedOnes[] = $droplet;
+        foreach( $this->getDropletsSnapshots($droplet) as $snapshot ) {
+            if ( strpos($snapshot->name, $snapPrefix) === FALSE  ) continue;
+            $managedOnes[] = $snapshot;
         }
 
         return $managedOnes;
@@ -311,8 +346,57 @@ class SnapManager {
     }
 
 
+    /**
+     * Prune older snapshots
+     * @param $configs
+     * @return actions
+     */
+    public function pruneOlderSnapshots( $configs ) {
+        /** @var  $trackActions actions to be tracked */
+        $trackActions = [];
 
-    public function getDoObjectManager(  ) {
+        $this->logger->info('Pruning older managed snapshots', $configs);
+
+        foreach ( $configs as $dropletSnapConfig ) {
+            // snapshots to be kept for current droplet
+            $keepSnapshots = $dropletSnapConfig['keep-snapshots'];
+
+            $droplet = $this->getDoObject( $dropletSnapConfig['name'] );
+            $managedSnapshots = $this->getManagedDropletSnapshots( $droplet );
+
+            $this->logger->info( sprintf('Removing snapshots from droplet %s', $droplet->name ) );
+
+            $n = 0;
+            /** @var Image $snapshot */
+            foreach( $managedSnapshots as $snapshot ) {
+                $n++;
+
+                // this one must be kept
+                if ( $n <= $keepSnapshots ) continue;
+
+                // otherwise, it's older and have to be pruned
+                $this->logger->info( sprintf('Removing snapshots %s', $snapshot->name ) );
+
+                try {
+                    $action = $this->digitalocean->image()
+                        ->delete($snapshot->id);
+                    $trackActions[] = $trackActions;
+                } catch ( \RuntimeException $e ) {
+                    $this->logger->error( sprintf('Couldn\'t remove snapshot %s. Got exception %s', $snapshot->name, $e->getMessage() ) );
+                }
+            }
+        }
+
+        return $trackActions;
+    }
+
+
+
+
+
+
+
+    public function getDoObjectManager() {
         return $this->digitalocean->droplet();
     }
 
