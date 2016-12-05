@@ -1,8 +1,6 @@
 <?php
 namespace DigitalOcean;
 
-use Buzz\Exception\RuntimeException;
-use DigitalOceanV2\Api\Droplet;
 use DigitalOceanV2\Entity\Image;
 use DigitalOceanV2\Exception\HttpException;
 use Monolog\Logger;
@@ -14,8 +12,6 @@ use DigitalOceanV2\DigitalOceanV2;
 
 
 class SnapManager {
-    const SNAP_PREFIX_BASE = 'snp-';
-
     const DO_SNAPSET_TYPE_DROPLET = 'droplet';
     const DO_SNAPSET_TYPE_VOLUME = 'volume';
 
@@ -27,6 +23,10 @@ class SnapManager {
 
     protected $config;
 
+    protected $basePrefix = 'snp-';
+
+    // number of snapshots to be kept for each dropdroplet
+    protected $keepSnapshots = 3;
 
 
     public function __construct( $config ) {
@@ -42,6 +42,10 @@ class SnapManager {
 
         // create a digital ocean object with the previous adapter
         $this->digitalocean = new DigitalOceanV2($adapter);
+
+        if ( array_key_exists('keep-snapshots', $config ) ) {
+            $this->setKeepSnapshots( $config['keep-snapshots'] );
+        }
     }
 
 
@@ -85,9 +89,6 @@ class SnapManager {
 
                 $action = $this->digitalocean->action()->getById( $createAction['actionId'] );
 
-                echo sprintf('ActionId = %d   status = %s', $action->id, $action->status );
-                echo "\n\n\n";
-
                 // action completed
                 if ( $action->status == 'completed' ) {
                     $pendingActions--;
@@ -95,7 +96,7 @@ class SnapManager {
                     $this->logger->info( sprintf('Droplet snapshot (%s) creation completed.', $createAction['droplet']->name ) );
 
                     // copy snapshot to specified regions
-                    $this->startCopyToRegions(
+                    $this-> startCopyToRegions(
                             $createAction['droplet'],
                             $createAction['snapshotName'],
                             $createAction['snapConfig']['copy-to-regions']
@@ -125,14 +126,9 @@ class SnapManager {
 
         $selectedSnapshot = $this->getSnapshotByName( $droplet, $snapshotName );
 
-
-//echo " ************ GOT SNAPSHOT *********** \n";
-//print_r($selectedSnapshot);
-//
-
         if ( $selectedSnapshot ) {
             foreach( $copyToRegions as $region ) {
-                $this->logger->info('Starting tranfer to region', $region);
+                $this->logger->info('Starting tranfer to region', [$region]);
 
                 try {
                     $action = $this->digitalocean->image()
@@ -143,6 +139,18 @@ class SnapManager {
             }
         }
     }
+
+
+    /**
+     * Reload droplet information
+     *
+     * @param \DigitalOceanV2\Entity\Droplet $droplet
+     * @return \DigitalOceanV2\Entity\Droplet|null
+     */
+    public function refreshDroplet( \DigitalOceanV2\Entity\Droplet $droplet ) {
+        return $this->getDoObject( $droplet->name );
+    }
+
 
 
 
@@ -162,17 +170,27 @@ class SnapManager {
         while ( ( $selectedSnapshot === null  ) and ( $attempts < 10 ) ) {
             $attempts++;
 
+            $droplet = $this->refreshDroplet( $droplet );
+
             // Get snapshot
-            $managedSnapshots = $this->getManagedDropletSnapshots( $droplet );
+            try {
+                $this->logger->info( sprintf('Getting managed snapshots of droplet %s', $droplet->name) );
+
+                $managedSnapshots = $this->getManagedDropletSnapshots( $droplet );
+            } catch ( \RuntimeException $e ) {
+                $this->logger->warn( sprintf('Failed to get managed snapshots of droplet %s', $droplet->name) );
+                continue;
+            }
 
             echo " GOT MANAGED SNAPSHOTS   **** \n";
-            print_r( $managedSnapshots );
 
             /** @var Image $snapshot */
             foreach ( $managedSnapshots as $snapshot ) {
                 if ( $snapshot->name != $snapshotName ) continue;
                 $selectedSnapshot = $snapshot;
             }
+
+            sleep(30);
         }
 
         return $selectedSnapshot;
@@ -266,14 +284,13 @@ class SnapManager {
             );
     }
 
-
     /**
      * Get prefix for managed snapshoots
      * @return string
      * @internal param $dropletName
      */
     private function getSnapshotPrefix( $dropletName ) {
-        return sprintf('%s%s',  static::SNAP_PREFIX_BASE, $dropletName);
+        return sprintf('%s-%s',  $this->getBasePrefix(), $dropletName);
     }
 
 
@@ -341,7 +358,6 @@ class SnapManager {
             }
         );
 
-
         return $snaphots;
     }
 
@@ -359,7 +375,7 @@ class SnapManager {
 
         foreach ( $configs as $dropletSnapConfig ) {
             // snapshots to be kept for current droplet
-            $keepSnapshots = $dropletSnapConfig['keep-snapshots'];
+            $keepSnapshots = $this->getKeepSnapshots();
 
             $droplet = $this->getDoObject( $dropletSnapConfig['name'] );
             $managedSnapshots = $this->getManagedDropletSnapshots( $droplet );
@@ -393,12 +409,42 @@ class SnapManager {
 
 
 
-
-
-
     public function getDoObjectManager() {
         return $this->digitalocean->droplet();
     }
 
+
+
+    /**
+     * @return string
+     */
+    public function getBasePrefix()
+    {
+        return $this->basePrefix;
+    }
+
+    /**
+     * @param string $basePrefix
+     */
+    public function setBasePrefix($basePrefix)
+    {
+        $this->basePrefix = $basePrefix;
+    }
+
+    /**
+     * @return int
+     */
+    public function getKeepSnapshots()
+    {
+        return $this->keepSnapshots;
+    }
+
+    /**
+     * @param int $keepSnapshots
+     */
+    public function setKeepSnapshots($keepSnapshots)
+    {
+        $this->keepSnapshots = $keepSnapshots;
+    }
 
 }

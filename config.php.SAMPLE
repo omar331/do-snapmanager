@@ -2,9 +2,11 @@
 
 $config = [
     // ---> Digital Ocean API Token
-    'do_api_token' => 'ssssssssssssssssssssssssss',
+    'do_api_token' => 'a123b45c12a123b45c12a123b45c12a123b45c12',
 
     'logfile' => __DIR__ . '/log/logfile.log',
+
+    'keep-snapshots' => 3,
 
     //
     // ---> Droplets to create snapshots from
@@ -12,9 +14,9 @@ $config = [
     'droplets' => [
          [
             'name' => 'prod-mongo-db',
-            'keep-snapshots' => 3,
             'copy-to-regions' => ['sfo2', 'nyc2']
          ],
      ],
 
 ];
+
